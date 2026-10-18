@@ -134,10 +134,16 @@ class LoginService : Service() {
             .setContentIntent(pendingIntent)
             .build()
         // Notification ID cannot be 0.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(1, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(1, notification)
+            }
+        } catch (e: IllegalStateException) { // Android 12+ can refuse a background start (e.g. from the alarm)
+            Log.w("LoginService", "not allowed to start in the foreground", e)
+            stopSelf()
+            return START_NOT_STICKY
         }
         if (intent?.action == ACTION_CHECK) {
             wakeLock.acquire(180_000) // held from the alarm until the check is done
