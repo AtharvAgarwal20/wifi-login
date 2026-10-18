@@ -50,9 +50,11 @@ class LoginService : Service() {
         private const val KEEPALIVE_EVERY = 14_400_000L // 4 h, like the portal's own keepalive page
         private const val MAX_FAILS = 2 // FortiGate locks an account after 3 failures by default
         private const val HOLD = 1_800_000L
-        // Goa still runs Sophos. Hyderabad's old https://172.16.0.30 can never pass certificate
-        // checks (an IP, not a name); add it back once its current portal is known.
-        private val SOPHOS = mapOf(1 to "https://campnet.bits-goa.ac.in:8090/login.xml")
+        // Goa and Hyderabad run Sophos portals. Hyderabad's only takes the login over plain HTTP to
+        // an IP (like its own web page), so we only ever send it when this network redirects there.
+        private const val GOA = "https://campnet.bits-goa.ac.in:8090"
+        private const val HYDERABAD = "http://172.16.0.30:8090"
+        private val SOPHOS = mapOf(1 to GOA, 2 to HYDERABAD)
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -214,19 +216,25 @@ class LoginService : Service() {
                 ONLINE_EVERY
             }
 
-            is Portal.FortiGate -> { // any campus
+            is Portal.FortiGate -> { // Pilani
+                if (settings.address != 0) return ONLINE_EVERY // a visitor's Goa/Hyderabad login isn't for this firewall
                 keepaliveUrl = null // that session is over
                 login(network, settings) { u, p -> Portal.loginFortiGate(network, state.url, u, p) }
                 RETRY_EVERY
             }
 
+            is Portal.Sophos -> { // Goa or Hyderabad: only the campus picked in the app
+                if (state.origin != SOPHOS[settings.address]) return ONLINE_EVERY
+                login(network, settings) { u, p -> Portal.loginSophos(network, "${state.origin}/login.xml", u, p) }
+                RETRY_EVERY
+            }
+
             Portal.OtherPortal, Portal.NoNetwork -> {
                 if (state == Portal.NoNetwork && ++noNetwork == 3) explainNoNetwork(network)
-                // Pilani: someone else's portal (or no internet), leave it.
-                val url = SOPHOS[settings.address] ?: return if (state == Portal.NoNetwork) RETRY_EVERY else ONLINE_EVERY
-                // Goa (Sophos): it may redirect or just block until we log in, so try either way.
-                // Off campus its hostname doesn't resolve, which counts as nothing sent.
-                login(network, settings) { u, p -> Portal.loginSophos(network, url, u, p) }
+                if (settings.address != 1) return if (state == Portal.NoNetwork) RETRY_EVERY else ONLINE_EVERY
+                // Goa may block instead of redirecting, so try its login anyway: it's HTTPS to a named
+                // host, and off campus that name doesn't resolve, which counts as nothing sent.
+                login(network, settings) { u, p -> Portal.loginSophos(network, "$GOA/login.xml", u, p) }
                 RETRY_EVERY
             }
         }
@@ -244,7 +252,7 @@ class LoginService : Service() {
 
         val outcome = attempt(s.username, s.password)
         if (outcome == Portal.NoForm) return
-        val accepted = (outcome as? Portal.Answered)?.keepalive != null // the firewall handed out a session
+        val accepted = (outcome as? Portal.Answered)?.accepted == true // a keepalive token, or Sophos said LIVE
         repeat(5) {
             delay(2_000)
             if (accepted || Portal.probe(network) == Portal.Online) {

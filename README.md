@@ -26,7 +26,7 @@ If you have the original app from the Play Store, uninstall it: both would try t
   answers instead, it opens the login page (which carries a one-time token), signs in over HTTPS to
   `fw.bits-pilani.ac.in` with its certificate verified, and confirms you're online.
 - **Goa (Sophos):** signs in through `campnet.bits-goa.ac.in`, the same way the campus web page does.
-- **Hyderabad:** handled if its portal is a FortiGate or the old Sophos one (not yet confirmed).
+- **Hyderabad (Sophos):** signs in through `172.16.0.30`. That portal only accepts logins over plain HTTP (like its own page), so the app only sends it when the network redirects to that portal.
 - **When:** as soon as Wi-Fi connects, when Android flags a captive portal, and when the screen turns
   on; otherwise once a minute while the screen is on and every 15 minutes while it's off.
 - **Keepalive:** BITS Pilani sessions end 12 hours after login. With *Session Keepalive* on (the

@@ -25,6 +25,23 @@ class PortalTest {
     }
 
     @Test
+    fun sophosPortalOnlyForCampusOrigins() {
+        assertEquals("http://172.16.0.30:8090", Portal.sophosOrigin("""location.href="http://172.16.0.30:8090/httpclient.html";""")) // Hyderabad
+        assertEquals("https://campnet.bits-goa.ac.in:8090", Portal.sophosOrigin("Location: https://campnet.bits-goa.ac.in:8090/httpclient.html"))
+        assertNull(Portal.sophosOrigin("""location.href="http://172.16.0.31:8090/httpclient.html";"""))
+        assertNull(Portal.sophosOrigin("""location.href="http://evil.example/httpclient.html";"""))
+    }
+
+    @Test
+    fun sophosReplies() {
+        val xml = { status: String, msg: String -> "<?xml version='1.0' ?><requestresponse><status><![CDATA[$status]]></status><message><![CDATA[$msg]]></message></requestresponse>" }
+        assertEquals(Portal.Answered(null, accepted = true), Portal.sophosOutcome(xml("LIVE", "You have successfully logged in")))
+        assertEquals(Portal.Answered(null), Portal.sophosOutcome(xml("LOGIN", "Login failed. Invalid user name/password."))) // counts toward the halt
+        assertEquals(Portal.NoAnswer, Portal.sophosOutcome(xml("LOGIN", "You have reached Maximum Login Limit."))) // retried later
+        assertEquals(Portal.NoAnswer, Portal.sophosOutcome("<html>503 Service Unavailable</html>"))
+    }
+
+    @Test
     fun formFields() {
         assertEquals("07575f2a083d9e7b", Portal.field("magic", form))
         assertEquals("http://connectivitycheck.gstatic.com/generate_204", Portal.field("4Tredir", form))
