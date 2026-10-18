@@ -2,12 +2,9 @@
 
 package dev.sparshg.bitslogin
 
-import android.app.Activity
-import android.content.ActivityNotFoundException
 import android.content.Context.MODE_PRIVATE
 import android.content.Context.POWER_SERVICE
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -15,6 +12,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.AnimatedContent
@@ -33,10 +31,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -48,15 +50,13 @@ import com.google.accompanist.drawablepainter.rememberDrawablePainter
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
-import com.google.android.play.core.review.ReviewInfo
-import com.google.android.play.core.review.ReviewManager
-import com.google.android.play.core.review.ReviewManagerFactory
 import dev.sparshg.bitslogin.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -104,14 +104,10 @@ fun Content(modifier: Modifier = Modifier) {
     val openDialogF1 = remember { mutableStateOf(false) }
     val openDialogF2 = remember { mutableStateOf(false) }
     val openDialogF3 = remember { mutableStateOf(false) }
-    val openReview = remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val prefName = stringResource(R.string.pref_name)
     val dataStore = Store(context)
     val settings: Settings by Store.getInstance(context).data.collectAsState(initial = Settings())
-    val reviewManager = remember {
-        ReviewManagerFactory.create(context)
-    }
-    val reviewInfo = rememberReviewTask(reviewManager)
     val scope = rememberCoroutineScope()
     val pm = context.getSystemService(POWER_SERVICE) as PowerManager
     val isIgnoringBatteryOptimizations = remember {
@@ -157,6 +153,8 @@ fun Content(modifier: Modifier = Modifier) {
                         OutlinedTextField(value = password,
                             onValueChange = { password = it },
                             label = { Text("Password") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             modifier = modifier.fillMaxWidth()
                         )
                     }
@@ -165,12 +163,14 @@ fun Content(modifier: Modifier = Modifier) {
                     TextButton(onClick = {
                         openDialog.value = false
                         if (username.isNotEmpty() && password.isNotEmpty()) {
+                            // Saving credentials is the "try again" after a rejected login.
+                            context.getSharedPreferences(prefName, MODE_PRIVATE).edit()
+                                .remove("rejected").remove("fails").remove("holdUntil").apply()
                             scope.launch {
                                 dataStore.setCredSet(true)
                                 dataStore.setUsername(username.trim())
                                 dataStore.setPassword(password.trim())
                             }
-                            VolleySingleton.getInstance(context).cancelAll()
                         }
                     }) {
                         Text("Confirm")
@@ -183,23 +183,6 @@ fun Content(modifier: Modifier = Modifier) {
                         Text("Dismiss")
                     }
                 })
-        }
-        if (openReview.value) {
-            openReview.value = false
-            LaunchedEffect(key1 = reviewInfo) {
-                if (settings.review < System.currentTimeMillis() - 2678400.toLong()) {
-                    scope.launch {
-                        dataStore.setReview(System.currentTimeMillis())
-                    }
-                    reviewInfo?.let {
-//                        Log.e("TAG", "reviewInfo: $reviewInfo")
-                        reviewManager.launchReviewFlow(context as Activity, reviewInfo)
-                    }
-                } else {
-                    uriHandler.openUri("https://play.google.com/store/apps/details?id=dev.sparshg.bitslogin")
-                    Toast.makeText(context, "Rate the app if you liked!", Toast.LENGTH_SHORT).show()
-                }
-            }
         }
         if (openDialog2.value) {
             var page by remember { mutableStateOf(0) }
@@ -214,7 +197,7 @@ fun Content(modifier: Modifier = Modifier) {
                             text = when (state) {
                                 0 -> "Open notifications panel and go to edit mode."
                                 1 -> "Drag the app tile to the top."
-                                2 -> "Click when connected to Wi-Fi and wait for it to deactivate."
+                                2 -> "Tap it when connected to Wi-Fi; a toast confirms the login."
                                 else -> ""
                             },
                             style = MaterialTheme.typography.bodyLarge,
@@ -257,7 +240,7 @@ fun Content(modifier: Modifier = Modifier) {
                 }
             })
         }
-        Column(modifier.fillMaxSize()) {
+        Column(modifier.fillMaxSize().safeDrawingPadding()) {
             LazyColumn(modifier.weight(1f)) {
                 item {
                     Text(
@@ -288,7 +271,6 @@ fun Content(modifier: Modifier = Modifier) {
                                         scope.launch {
                                             dataStore.setAddress(0)
                                         }
-                                        VolleySingleton.getInstance(context.applicationContext).cancelAll()
                                     }) {
                                     Text(modifier = modifier.padding(6.dp), text = "Pilani")
                                 }
@@ -306,7 +288,6 @@ fun Content(modifier: Modifier = Modifier) {
                                         scope.launch {
                                             dataStore.setAddress(1)
                                         }
-                                        VolleySingleton.getInstance(context.applicationContext).cancelAll()
                                     }) {
                                     Text(modifier = modifier.padding(6.dp), text = "Goa")
                                 }
@@ -325,7 +306,6 @@ fun Content(modifier: Modifier = Modifier) {
                                         scope.launch {
                                             dataStore.setAddress(2)
                                         }
-                                        VolleySingleton.getInstance(context.applicationContext).cancelAll()
                                     }) {
                                     Text(modifier = modifier.padding(6.dp), text = "Hyderabad")
                                 }
@@ -377,6 +357,29 @@ fun Content(modifier: Modifier = Modifier) {
                         }
                     }
 
+                }
+                item {
+                    AnimatedContent(targetState = settings.keepalive) {
+                        if (it) {
+                            Tile("Session Keepalive: On",
+                                "Refreshes your login every 4 hours, like the portal's own keepalive page, so it may last past 12 h. Costs about 6 small requests a day (~40 KB on campus Wi-Fi, negligible battery). Tap to turn off.",
+                                TileState.TICKED,
+                                onClick = {
+                                    scope.launch {
+                                        dataStore.setKeepalive(false)
+                                    }
+                                })
+                        } else {
+                            Tile("Session Keepalive: Off",
+                                "Your login ends 12 h after you log in and the app logs you back in. Tap to turn on (about 6 small requests a day).",
+                                TileState.EXCLAMATION,
+                                onClick = {
+                                    scope.launch {
+                                        dataStore.setKeepalive(true)
+                                    }
+                                })
+                        }
+                    }
                 }
                 item {
                     if (settings.qsAdded) {
@@ -524,7 +527,7 @@ fun Content(modifier: Modifier = Modifier) {
                     },
                     text = {
                         Text(
-                            "Background service only takes about 10MB memory, and is triggered only when Wi-Fi connects",
+                            "The service checks your Wi-Fi login with one tiny request a minute while the screen is on and every 15 minutes while it's off (a few hundred a day, under 1 MB on campus Wi-Fi). Session keepalive adds about 6 more a day; you can turn it off.",
                             style = MaterialTheme.typography.bodyLarge
                         )
 
@@ -538,55 +541,23 @@ fun Content(modifier: Modifier = Modifier) {
                     })
             }
             BottomAppBar(actions = {
-                IconButton(onClick = { uriHandler.openUri("https://github.com/sparshg/wifi-login") }) {
+                IconButton(onClick = { uriHandler.openUri("https://github.com/AtharvAgarwal20/wifi-login") }) {
                     Image(
                         painter = rememberDrawablePainter(
                             drawable = getDrawable(LocalContext.current, R.drawable.ic_github)
                         ),
                         colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground),
-                        contentDescription = "GitHub Contact",
-                    )
-                }
-                IconButton(onClick = { uriHandler.openUri("https://www.linkedin.com/in/sparsh-goenka-521ba9222/") }) {
-                    Image(
-                        painter = rememberDrawablePainter(
-                            drawable = getDrawable(
-                                LocalContext.current, R.drawable.ic_linkedin
-                            ),
-
-                            ),
-                        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground),
-                        contentDescription = "LinkedIn Contact",
-                    )
-                }
-                IconButton(onClick = {
-                    openReview.value = true
-                }) {
-                    Icon(
-                        Icons.Filled.Star,
-                        contentDescription = "Playstore",
-                        modifier = modifier.size(28.dp)
+                        contentDescription = "GitHub",
                     )
                 }
             }, floatingActionButton = {
                 ExtendedFloatingActionButton(
-                    onClick = {
-                        val intent = Intent(Intent.ACTION_SENDTO).apply {
-                            data = Uri.parse("mailto:sparshg.contact@gmail.com")
-                        }
-                        try {
-                            context.startActivity(intent)
-                        } catch (ex: ActivityNotFoundException) {
-//                            Log.e("Error", ex.message.toString())
-                        }
-
-
-                    },
+                    onClick = { uriHandler.openUri("https://github.com/AtharvAgarwal20/wifi-login/issues") },
                     containerColor = BottomAppBarDefaults.bottomAppBarFabColor,
                     elevation = FloatingActionButtonDefaults.bottomAppBarFabElevation(
                         1.dp, 0.dp, 1.dp, 1.dp
                     ),
-                    icon = { Icon(Icons.Filled.Edit, "Write email") },
+                    icon = { Icon(Icons.Filled.Edit, "Report an issue") },
                     text = { Text(text = "Feedback") },
 
                     )
@@ -594,20 +565,6 @@ fun Content(modifier: Modifier = Modifier) {
 
         }
     }
-}
-
-@Composable
-fun rememberReviewTask(reviewManager: ReviewManager): ReviewInfo? {
-    var reviewInfo: ReviewInfo? by remember {
-        mutableStateOf(null)
-    }
-    reviewManager.requestReviewFlow().addOnCompleteListener {
-        if (it.isSuccessful) {
-            reviewInfo = it.result
-        }
-    }
-
-    return reviewInfo
 }
 
 @Composable
